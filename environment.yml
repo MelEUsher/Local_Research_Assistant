@@ -1,0 +1,16 @@
+name: research_assistant
+channels:
+  - defaults
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pip
+  - pip:
+    - langchain>=0.1.0
+    - langchain-community>=0.0.20
+    - langgraph>=0.0.20
+    - google-api-python-client>=2.100.0
+    - ollama>=0.1.0
+    - python-dotenv>=1.0.0
+    - pydantic>=2.0.0
+
