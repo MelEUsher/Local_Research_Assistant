@@ -1,0 +1,41 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Validate Setup",
+      "type": "shell",
+      "command": "python validate_setup.py",
+      "group": {
+        "kind": "test",
+        "isDefault": true
+      },
+      "presentation": {
+        "reveal": "always"
+      }
+    },
+    {
+      "label": "Install Dependencies",
+      "type": "shell",
+      "command": "pip install -r requirements.txt",
+      "group": {
+        "kind": "build"
+      },
+      "presentation": {
+        "reveal": "always"
+      }
+    },
+    {
+      "label": "Start Ollama",
+      "type": "shell",
+      "command": "ollama serve",
+      "isBackground": true,
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "showReuseMessage": false,
+        "clear": false
+      },
+      "problemMatcher": []
+    }
+  ]
+}
