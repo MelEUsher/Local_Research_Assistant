@@ -6,6 +6,7 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
 from config import GOOGLE_API_KEY, GOOGLE_CSE_ID, validate_google_credentials
+from logger import logger
 
 
 class GoogleSearchService:
@@ -29,6 +30,11 @@ class GoogleSearchService:
             List of dictionaries containing 'title', 'link', and 'snippet'
         """
         try:
+            logger.info(
+                "Searching the web for query '%s' with num_results=%d",
+                query,
+                num_results,
+            )
             results = []
             # Google Custom Search API allows max 10 results per request
             max_per_request = min(num_results, 10)
@@ -45,12 +51,19 @@ class GoogleSearchService:
                     "link": item.get("link", ""),
                     "snippet": item.get("snippet", "")
                 })
-            
+
+            logger.info(
+                "Search completed with %d results for query '%s'",
+                len(results),
+                query,
+            )
             return results
         
         except HttpError as http_error:
+            logger.exception("HTTP error occurred during search for query '%s'", query)
             self._handle_http_error(http_error, "performing a search")
         except (ConnectionError, TimeoutError, OSError) as network_error:
+            logger.exception("Network error occurred during search for query '%s'", query)
             self._handle_network_error(network_error, "performing a search")
 
     def format_results_for_llm(self, results: List[Dict[str, str]]) -> str:
@@ -84,11 +97,17 @@ class GoogleSearchService:
         ).execute()
 
     def _handle_network_error(self, error: Exception, context: str):
+        logger.error(
+            "Network error while %s: %s", context, error, exc_info=True
+        )
         raise ConnectionError(
             f"Network error while {context}; check connectivity and proxy settings."
         ) from error
 
     def _handle_http_error(self, http_error: HttpError, context: str):
+        logger.error(
+            "HTTP error while %s: %s", context, http_error, exc_info=True
+        )
         reason, message = self._parse_http_error(http_error)
         base_message = f"Google Search API error while {context}"
 

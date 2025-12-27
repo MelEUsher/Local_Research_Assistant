@@ -3,6 +3,7 @@ from typing import TypedDict, List, Dict
 from langgraph.graph import StateGraph, END
 from search_service import GoogleSearchService
 from llm_service import OllamaLLMService
+from logger import logger
 import re
 
 
@@ -45,15 +46,19 @@ class ResearchWorkflow:
     
     def _refine_query_node(self, state: ResearchState) -> ResearchState:
         """Node: Refine the user's query for better search results."""
-        print(f"🔍 Refining query: {state['original_query']}")
+        print(f"🔍 Refining query: {state['original_query']}")  # ADD THIS
+        logger.info("Entering node refine_query for query: %s", state['original_query'])
         refined = self.llm_service.refine_query(state['original_query'])
         state['refined_query'] = refined
-        print(f"✅ Refined query: {refined}")
+        print(f"✅ Refined query: {refined}")  # ADD THIS
+        logger.info("Refined query ready")
+        logger.debug("State after refine_query: refined_query=%s", state['refined_query'])
         return state
     
     def _fetch_sources_node(self, state: ResearchState) -> ResearchState:
         """Node: Fetch information from web sources."""
-        print(f"🌐 Searching the web...")
+        print(f"🌐 Searching the web...")  # ADD THIS
+        logger.info("Entering node fetch_sources for query: %s", state['refined_query'])
         num_results = 5
         if not (1 <= num_results <= 10):
             raise ValueError("num_results for fetching sources must be between 1 and 10.")
@@ -61,11 +66,15 @@ class ResearchWorkflow:
         state['search_results'] = results
         state['formatted_results'] = self.search_service.format_results_for_llm(results)
         print(f"✅ Found {len(results)} search results")
+        logger.info("Fetched %d search results for query: %s", len(results), state['refined_query'])
+        logger.debug("State after fetch_sources: num_results=%d, formatted_length=%d", 
+             len(state['search_results']), len(state['formatted_results']))
         return state
     
     def _summarize_node(self, state: ResearchState) -> ResearchState:
         """Node: Summarize search results into structured facts."""
         print(f"📝 Summarizing results...")
+        logger.info("Entering node summarize")
         # Extract number of facts from original query if specified
         num_facts = self._extract_num_facts(state['original_query'])
         summary = self.llm_service.summarize_search_results(
@@ -75,10 +84,13 @@ class ResearchWorkflow:
         )
         state['summary'] = summary
         print(f"✅ Summary generated")
+        logger.info("Summary generated with %d facts", num_facts)
+        logger.debug("State after summarize: summary_length=%d", len(state['summary']))
         return state
     
     def _format_output_node(self, state: ResearchState) -> ResearchState:
         """Node: Format the final output."""
+        logger.info("Entering node format_output")
         output = f"""# Research Results
 
 ## Original Query
@@ -97,6 +109,7 @@ class ResearchWorkflow:
             output += f"{i}. [{result['title']}]({result['link']})\n"
         
         state['output'] = output
+        logger.debug("State after format_output: output_length=%d", len(state['output']))
         return state
     
     def _extract_num_facts(self, query: str) -> int:
@@ -134,5 +147,8 @@ class ResearchWorkflow:
             "output": ""
         }
         
+        logger.info("Starting research workflow for query: %s", cleaned_request)
         final_state = self.graph.invoke(initial_state)
+        logger.info("Workflow completed for query: %s", cleaned_request)
+        logger.debug("Final output length: %d characters", len(final_state['output']))
         return final_state['output']

@@ -4,6 +4,7 @@ import socket
 from urllib import error as _urllib_error, parse as _urllib_parse, request as _urllib_request
 
 from config import OLLAMA_BASE_URL, OLLAMA_MODEL
+from logger import logger
 
 try:
     from langchain_community.llms import Ollama
@@ -111,15 +112,31 @@ Search Results:
 {search_results}
 
 Response:"""
-        
+        logger.info(
+            "Invoking LLM '%s' for summary (prompt length=%d)",
+            self.model_name,
+            len(prompt),
+        )
         try:
             response = self.llm.invoke(prompt)
+            logger.info(
+                "LLM summary completed (response length=%d)",
+                len(response),
+            )
             return response
         except (ConnectionError, OSError) as exc:
+            logger.exception(
+                "LLM connection error during summarization for '%s'",
+                query,
+            )
             raise ConnectionError(
                 "Lost connection to Ollama while generating the summary. Run 'ollama serve' and try again."
             ) from exc
         except Exception as exc:
+            logger.exception(
+                "LLM error during summarization for '%s'",
+                query,
+            )
             raise RuntimeError(f"Error generating summary: {exc}") from exc
 
     def refine_query(self, research_request: str) -> str:
@@ -137,15 +154,27 @@ Response:"""
 Research Request: "{research_request}"
 
 Provide only the search query (no explanation):"""
-        
+        logger.info(
+            "Invoking LLM '%s' to refine query (prompt length=%d)",
+            self.model_name,
+            len(prompt),
+        )
         try:
             refined = self.llm.invoke(prompt)
-            # Clean up the response
             refined = refined.strip().strip('"').strip("'")
+            logger.info("LLM refined query to '%s'", refined)
             return refined
         except (ConnectionError, OSError) as exc:
+            logger.exception(
+                "LLM connection error during query refinement for '%s'",
+                research_request,
+            )
             raise ConnectionError(
                 "Lost connection to Ollama while refining the query. Run 'ollama serve' and try again."
             ) from exc
         except Exception as exc:
+            logger.exception(
+                "LLM error during query refinement for '%s'",
+                research_request,
+            )
             raise RuntimeError(f"Error refining query: {exc}") from exc
