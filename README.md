@@ -165,8 +165,10 @@ Edit the `_format_output_node` method in `workflow.py` to customize the output s
 
 ### "Connection refused" or Ollama errors
 - Ensure Ollama is running: `ollama serve`
-- Check `OLLAMA_BASE_URL` in `.env` matches your Ollama instance
 - Verify the model exists: `ollama list`
+- Pull the model if needed: `ollama pull llama3.2`
+- Check `OLLAMA_BASE_URL` in `.env` matches your Ollama instance
+
 
 ### Search API errors
 - Verify your API key is valid and has the Custom Search API enabled

@@ -1,6 +1,7 @@
 """Main entry point for the research assistant."""
 import sys
 from workflow import ResearchWorkflow
+from config import OLLAMA_MODEL
 
 
 def main():
@@ -29,6 +30,13 @@ def main():
         print(result)
         print("\n" + "=" * 50)
         
+    except ConnectionError as e:
+        # Clean error message for Ollama connection issues
+        print(f"❌ Connection Error: {e}")
+        print("\n💡 Make sure Ollama is running:")
+        print("   1. Run: ollama serve")
+        print("   2. Verify your model is installed: ollama list")
+        print(f"   3. If needed, pull the model: ollama pull {OLLAMA_MODEL}")
     except ValueError as e:
         print(f"❌ Configuration Error: {e}")
         print("\nPlease ensure you have set up your .env file with:")
@@ -42,4 +50,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
