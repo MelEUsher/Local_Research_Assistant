@@ -54,7 +54,10 @@ class ResearchWorkflow:
     def _fetch_sources_node(self, state: ResearchState) -> ResearchState:
         """Node: Fetch information from web sources."""
         print(f"🌐 Searching the web...")
-        results = self.search_service.search(state['refined_query'], num_results=5)
+        num_results = 5
+        if not (1 <= num_results <= 10):
+            raise ValueError("num_results for fetching sources must be between 1 and 10.")
+        results = self.search_service.search(state['refined_query'], num_results=num_results)
         state['search_results'] = results
         state['formatted_results'] = self.search_service.format_results_for_llm(results)
         print(f"✅ Found {len(results)} search results")
@@ -114,8 +117,16 @@ class ResearchWorkflow:
         Returns:
             Formatted research results
         """
+        cleaned_request = research_request.strip()
+        if not cleaned_request:
+            raise ValueError("Research request must not be empty or whitespace only.")
+        if len(cleaned_request) < 3:
+            raise ValueError("Research request must be at least 3 characters long.")
+        if len(cleaned_request) > 500:
+            raise ValueError("Research request must be at most 500 characters long.")
+
         initial_state: ResearchState = {
-            "original_query": research_request,
+            "original_query": cleaned_request,
             "refined_query": "",
             "search_results": [],
             "formatted_results": "",
@@ -125,4 +136,3 @@ class ResearchWorkflow:
         
         final_state = self.graph.invoke(initial_state)
         return final_state['output']
-
