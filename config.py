@@ -2,34 +2,52 @@
 import os
 from dotenv import load_dotenv
 
+from config_validator import ConfigValidator
+
 load_dotenv()
 
 # Google Search API
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "").strip()
 GOOGLE_CSE_ID = os.getenv("GOOGLE_CSE_ID", "").strip()
 
-
-def validate_google_credentials():
-    """Ensure both Google Search credentials are populated before use."""
-    missing = [
-        name for name, value in (
-            ("GOOGLE_API_KEY", GOOGLE_API_KEY),
-            ("GOOGLE_CSE_ID", GOOGLE_CSE_ID),
-        )
-        if not value
-    ]
-
-    if missing:
-        missing_vars = " and ".join(missing) if len(missing) == 2 else missing[0]
-        raise ValueError(
-            f"Missing Google Search credentials: {missing_vars}. "
-            "Provide valid GOOGLE_API_KEY and GOOGLE_CSE_ID values in the environment or .env before starting the assistant."
-        )
-
 # Ollama Configuration
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.2")
 
 
-# Ensure credentials are validated as soon as the module is loaded.
-validate_google_credentials()
+def _build_validator() -> ConfigValidator:
+    """Create a validator that reflects the loaded configuration values."""
+    return ConfigValidator(
+        google_api_key=GOOGLE_API_KEY,
+        google_cse_id=GOOGLE_CSE_ID,
+        ollama_base_url=OLLAMA_BASE_URL,
+        ollama_model=OLLAMA_MODEL,
+    )
+
+
+def validate_config():
+    """Return detailed validation results for the current configuration."""
+    validator = _build_validator()
+    google_issues = validator.validate_google_config()
+    ollama_issues = validator.validate_ollama_config()
+    issues = google_issues + ollama_issues
+
+    return {
+        "valid": not issues,
+        "issues": issues,
+        "details": {
+            "google": google_issues,
+            "ollama": ollama_issues,
+        },
+    }
+
+
+def validate_google_credentials():
+    """Ensure both Google Search credentials are populated before use."""
+    validator = _build_validator()
+    missing = validator.validate_google_config()
+
+    if missing:
+        raise ValueError(
+            "Google Search configuration invalid: " + " ".join(missing)
+        )
