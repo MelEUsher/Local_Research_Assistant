@@ -4,6 +4,7 @@ import socket
 from urllib import error as _urllib_error, parse as _urllib_parse, request as _urllib_request
 
 from config import OLLAMA_BASE_URL, OLLAMA_MODEL
+from retry_handler import retry_with_backoff
 
 try:
     from langchain_community.llms import Ollama
@@ -36,9 +37,10 @@ class OllamaLLMService:
 
     def verify_connection(self) -> bool:
         """Ensure the Ollama server is reachable and that the desired model exists."""
+        # Ollama documents `/api/models` as the stable model listing endpoint.
         models_url = _urllib_parse.urljoin(
             f"{self.base_url.rstrip('/')}/",
-            "api/tags"
+            "api/models"
         )
 
         try:
@@ -88,6 +90,7 @@ class OllamaLLMService:
 
         return True
 
+    @retry_with_backoff(max_retries=2, base_delay=1.0)
     def summarize_search_results(
         self, 
         query: str, 
@@ -128,6 +131,7 @@ Response:"""
         except Exception as exc:
             raise RuntimeError(f"Error generating summary: {exc}") from exc
 
+    @retry_with_backoff(max_retries=2, base_delay=1.0)
     def refine_query(self, research_request: str) -> str:
         """
         Refine the user's research request into a better search query.

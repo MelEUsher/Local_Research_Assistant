@@ -7,6 +7,7 @@ from googleapiclient.errors import HttpError
 
 from config import GOOGLE_API_KEY, GOOGLE_CSE_ID, validate_google_credentials
 from logger import logger
+from retry_handler import RateLimitError, retry_with_backoff
 
 
 class GoogleSearchService:
@@ -18,6 +19,7 @@ class GoogleSearchService:
         # Keep a reference to the CSE ID to avoid relying on globals during execution.
         self._cse_id = GOOGLE_CSE_ID
 
+    @retry_with_backoff(max_retries=3, base_delay=2.0)
     def search(self, query: str, num_results: int = 5) -> List[Dict[str, str]]:
         """
         Perform a web search and return results.
@@ -124,7 +126,7 @@ class GoogleSearchService:
             ) from http_error
 
         if reason in {"dailyLimitExceeded", "quotaExceeded"}:
-            raise RuntimeError(
+            raise RateLimitError(
                 f"{base_message}: quota exceeded ({reason}). "
                 "Wait for quotas to reset or request additional quota in the Google Cloud console."
             ) from http_error
