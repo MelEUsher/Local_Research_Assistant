@@ -1,10 +1,11 @@
 """LangGraph workflow for research assistance."""
 from collections import deque
-from typing import TypedDict, List, Dict, Tuple, Any
+from typing import TypedDict, List, Dict, Tuple, Any, Optional
 from langgraph.graph import StateGraph, END
 from search_service import GoogleSearchService
 from llm_service import OllamaLLMService
 from logger import logger
+from export_service import ExportService
 import re
 
 
@@ -16,6 +17,7 @@ class ResearchState(TypedDict):
     formatted_results: str
     summary: str
     output: str
+    export_filename: str
 
 
 class ResearchWorkflow:
@@ -23,13 +25,15 @@ class ResearchWorkflow:
 
     SUMMARY_CACHE_LIMIT = 50
 
-    def __init__(self):
+    def __init__(self, export_service: Optional[ExportService] = None):
         self.search_service = GoogleSearchService()
         self.llm_service = OllamaLLMService()
         self._cache_enabled = True
         self._source_cache: Dict[Tuple[str, int], Dict[str, Any]] = {}
         self._summary_cache: Dict[Tuple[str, int, int], str] = {}
         self._summary_cache_order = deque()
+        self.export_service = export_service
+        self._last_state: Optional[ResearchState] = None
         self.graph = self._build_graph()
     
     def _build_graph(self) -> StateGraph:
@@ -169,14 +173,22 @@ class ResearchWorkflow:
         while len(self._summary_cache_order) > self.SUMMARY_CACHE_LIMIT:
             oldest = self._summary_cache_order.popleft()
             self._summary_cache.pop(oldest, None)
+
+    @property
+    def last_state(self) -> Optional[ResearchState]:
+        """Access the most recent workflow state."""
+        return self._last_state
     
-    def run(self, research_request: str, use_cache: bool = True) -> str:
+    def run(
+        self, research_request: str, use_cache: bool = True, auto_export: bool = False
+    ) -> str:
         """
         Execute the research workflow.
 
         Args:
             research_request: Natural language research request
             use_cache: Flag to enable or disable the in-memory cache.
+            auto_export: If True, automatically save the final output to markdown.
 
         Returns:
             Formatted research results
@@ -195,7 +207,8 @@ class ResearchWorkflow:
             "search_results": [],
             "formatted_results": "",
             "summary": "",
-            "output": ""
+            "output": "",
+            "export_filename": ""
         }
         
         logger.info("Starting research workflow for query: %s", cleaned_request)
@@ -205,6 +218,20 @@ class ResearchWorkflow:
             final_state = self.graph.invoke(initial_state)
         finally:
             self._cache_enabled = previous_cache_state
+
+        if auto_export:
+            if not self.export_service:
+                raise ValueError(
+                    "Auto export requested but no ExportService is configured."
+                )
+            export_name = self.export_service.auto_generate_filename(cleaned_request)
+            export_path = self.export_service.save_to_markdown(
+                final_state["output"], export_name
+            )
+            final_state["export_filename"] = export_path
+            logger.info("Exported results to %s", export_path)
+
+        self._last_state = final_state
         logger.info("Workflow completed for query: %s", cleaned_request)
-        logger.debug("Final output length: %d characters", len(final_state['output']))
-        return final_state['output']
+        logger.debug("Final output length: %d characters", len(final_state["output"]))
+        return final_state["output"]
