@@ -2,6 +2,7 @@
 import argparse
 import sys
 
+from export_service import ExportService
 from workflow import ResearchWorkflow
 from config import OLLAMA_MODEL, validate_config
 from logger import logger
@@ -66,14 +67,20 @@ def _run_with_args(args):
     try:
         logger.info("Processing research query: %s", query)
         print(f"\n🚀 Processing: {query}\n")
-        workflow = ResearchWorkflow()
-        result = workflow.run(query)
+        export_service = ExportService() if args.export else None
+        workflow = ResearchWorkflow(export_service=export_service)
+        result = workflow.run(query, auto_export=args.export)
 
         print("\n" + "=" * 50)
         print("📊 RESEARCH RESULTS")
         print("=" * 50 + "\n")
         print(result)
         print("\n" + "=" * 50)
+        if args.export:
+            export_state = workflow.last_state or {}
+            export_path = export_state.get("export_filename", "")
+            if export_path:
+                print(f"\n✅ Exported results to {export_path}")
         logger.info("Research workflow completed for query: %s", query)
 
     except ConnectionError as e:
@@ -101,6 +108,12 @@ def _run_with_args(args):
 def main():
     parser = argparse.ArgumentParser(description="Run the local research assistant.")
     parser.add_argument("-c", "--check", action="store_true", help="Validate configuration and exit.")
+    parser.add_argument(
+        "-e",
+        "--export",
+        action="store_true",
+        help="Save the research output to markdown and JSON files.",
+    )
     parser.add_argument("query", nargs="*", help="Research query text (omit to use the interactive prompt).")
     args = parser.parse_args()
 
