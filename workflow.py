@@ -1,6 +1,6 @@
 """LangGraph workflow for research assistance."""
 from collections import deque
-from typing import TypedDict, List, Dict, Tuple, Any, Optional
+from typing import TypedDict, List, Dict, Tuple, Any, Optional, Callable
 from langgraph.graph import StateGraph, END
 from search_service import GoogleSearchService
 from llm_service import OllamaLLMService
@@ -25,12 +25,27 @@ class ResearchWorkflow:
 
     SUMMARY_CACHE_LIMIT = 50
 
-    def __init__(self, export_service: Optional[ExportService] = None):
-        self.search_service = GoogleSearchService()
-        self.llm_service = OllamaLLMService()
+    def __init__(
+        self,
+        export_service: Optional[ExportService] = None,
+        ui_callbacks: Optional[Dict[str, Callable[..., None]]] = None,
+        search_service_factory: Optional[Callable[[], GoogleSearchService]] = None,
+        llm_service_factory: Optional[Callable[[], OllamaLLMService]] = None,
+        source_cache: Optional[Dict[Tuple[str, int], Dict[str, Any]]] = None,
+        summary_cache: Optional[Dict[Tuple[str, int, int], str]] = None,
+    ):
+        self._ui_callbacks = ui_callbacks or {}
+        if search_service_factory:
+            self.search_service = search_service_factory()
+        else:
+            self.search_service = GoogleSearchService()
+        if llm_service_factory:
+            self.llm_service = llm_service_factory()
+        else:
+            self.llm_service = OllamaLLMService()
         self._cache_enabled = True
-        self._source_cache: Dict[Tuple[str, int], Dict[str, Any]] = {}
-        self._summary_cache: Dict[Tuple[str, int, int], str] = {}
+        self._source_cache = source_cache if source_cache is not None else {}
+        self._summary_cache = summary_cache if summary_cache is not None else {}
         self._summary_cache_order = deque()
         self.export_service = export_service
         self._last_state: Optional[ResearchState] = None
@@ -54,77 +69,120 @@ class ResearchWorkflow:
         workflow.add_edge("format_output", END)
         
         return workflow.compile()
+
+    def _notify_ui(self, event: str, stage: str, exc: Optional[Exception] = None) -> None:
+        """Invoke a UI callback if one was provided."""
+        callback = self._ui_callbacks.get(event)
+        if not callback:
+            return
+        try:
+            if exc is not None:
+                callback(stage, exc)
+            else:
+                callback(stage)
+        except Exception as warning_exc:  # pragma: no cover - instrumentation errors shouldn't break workflow
+            logger.warning(
+                "UI callback '%s' for stage '%s' raised an exception: %s",
+                event,
+                stage,
+                warning_exc,
+                exc_info=True,
+            )
     
     def _refine_query_node(self, state: ResearchState) -> ResearchState:
         """Node: Refine the user's query for better search results."""
-        print(f"🔍 Refining query: {state['original_query']}")  # ADD THIS
-        logger.info("Entering node refine_query for query: %s", state['original_query'])
-        refined = self.llm_service.refine_query(state['original_query'])
-        state['refined_query'] = refined
-        print(f"✅ Refined query: {refined}")  # ADD THIS
-        logger.info("Refined query ready")
-        logger.debug("State after refine_query: refined_query=%s", state['refined_query'])
-        return state
+        stage = "Refining"
+        self._notify_ui("on_stage_start", stage)
+        try:
+            print(f"🔍 Refining query: {state['original_query']}")  # ADD THIS
+            logger.info("Entering node refine_query for query: %s", state['original_query'])
+            refined = self.llm_service.refine_query(state['original_query'])
+            state['refined_query'] = refined
+            print(f"✅ Refined query: {refined}")  # ADD THIS
+            logger.info("Refined query ready")
+            logger.debug("State after refine_query: refined_query=%s", state['refined_query'])
+        except Exception as exc:
+            self._notify_ui("on_stage_fail", stage, exc)
+            raise
+        else:
+            self._notify_ui("on_stage_complete", stage)
+            return state
     
     def _fetch_sources_node(self, state: ResearchState) -> ResearchState:
         """Node: Fetch information from web sources."""
-        print(f"🌐 Searching the web...")  # ADD THIS
-        logger.info("Entering node fetch_sources for query: %s", state['refined_query'])
-        num_results = 5
-        if not (1 <= num_results <= 10):
-            raise ValueError("num_results for fetching sources must be between 1 and 10.")
-        cache_key = (state['refined_query'], num_results)
-        cached_entry = self._source_cache.get(cache_key) if self._cache_enabled else None
-        if cached_entry:
-            logger.info("Cache hit for fetch_sources: %s", cache_key)
-            state['search_results'] = cached_entry['search_results']
-            state['formatted_results'] = cached_entry['formatted_results']
-            results = state['search_results']
+        stage = "Searching"
+        self._notify_ui("on_stage_start", stage)
+        try:
+            print(f"🌐 Searching the web...")  # ADD THIS
+            logger.info("Entering node fetch_sources for query: %s", state['original_query'])
+            num_results = 5
+            if not (1 <= num_results <= 10):
+                raise ValueError("num_results for fetching sources must be between 1 and 10.")
+            cache_key = (state['original_query'], num_results)
+            cached_entry = self._source_cache.get(cache_key) if self._cache_enabled else None
+            if cached_entry:
+                logger.info("Cache hit for fetch_sources: %s", cache_key)
+                state['search_results'] = cached_entry['search_results']
+                state['formatted_results'] = cached_entry['formatted_results']
+                results = state['search_results']
+            else:
+                if self._cache_enabled:
+                    logger.info("Cache miss for fetch_sources: %s", cache_key)
+                results = self.search_service.search(state['refined_query'], num_results=num_results)
+                state['search_results'] = results
+                state['formatted_results'] = self.search_service.format_results_for_llm(results)
+                if self._cache_enabled:
+                    self._source_cache[cache_key] = {
+                        "search_results": results,
+                        "formatted_results": state['formatted_results']
+                    }
+            print(f"✅ Found {len(results)} search results")
+            logger.info("Fetched %d search results for query: %s", len(results), state['original_query'])
+            logger.debug("State after fetch_sources: num_results=%d, formatted_length=%d", 
+                 len(state['search_results']), len(state['formatted_results']))
+        except Exception as exc:
+            self._notify_ui("on_stage_fail", stage, exc)
+            raise
         else:
-            if self._cache_enabled:
-                logger.info("Cache miss for fetch_sources: %s", cache_key)
-            results = self.search_service.search(state['refined_query'], num_results=num_results)
-            state['search_results'] = results
-            state['formatted_results'] = self.search_service.format_results_for_llm(results)
-            if self._cache_enabled:
-                self._source_cache[cache_key] = {
-                    "search_results": results,
-                    "formatted_results": state['formatted_results']
-                }
-        print(f"✅ Found {len(results)} search results")
-        logger.info("Fetched %d search results for query: %s", len(results), state['refined_query'])
-        logger.debug("State after fetch_sources: num_results=%d, formatted_length=%d", 
-             len(state['search_results']), len(state['formatted_results']))
-        return state
+            self._notify_ui("on_stage_complete", stage)
+            return state
     
     def _summarize_node(self, state: ResearchState) -> ResearchState:
         """Node: Summarize search results into structured facts."""
-        print(f"📝 Summarizing results...")
-        logger.info("Entering node summarize")
-        # Extract number of facts from original query if specified
-        num_facts = self._extract_num_facts(state['original_query'])
-        formatted_hash = hash(state['formatted_results'])
-        cache_key = (state['original_query'], num_facts, formatted_hash)
-        cached_summary = self._summary_cache.get(cache_key) if self._cache_enabled else None
-        if cached_summary:
-            logger.info("Cache hit for summarize: %s", cache_key)
-            summary = cached_summary
-            self._touch_summary_cache_key(cache_key)
+        stage = "Summarizing"
+        self._notify_ui("on_stage_start", stage)
+        try:
+            print(f"📝 Summarizing results...")
+            logger.info("Entering node summarize")
+            # Extract number of facts from original query if specified
+            num_facts = self._extract_num_facts(state['original_query'])
+            formatted_hash = hash(state['formatted_results'])
+            cache_key = (state['original_query'], num_facts, formatted_hash)
+            cached_summary = self._summary_cache.get(cache_key) if self._cache_enabled else None
+            if cached_summary:
+                logger.info("Cache hit for summarize: %s", cache_key)
+                summary = cached_summary
+                self._touch_summary_cache_key(cache_key)
+            else:
+                if self._cache_enabled:
+                    logger.info("Cache miss for summarize: %s", cache_key)
+                summary = self.llm_service.summarize_search_results(
+                    state['original_query'],
+                    state['formatted_results'],
+                    num_facts=num_facts
+                )
+                if self._cache_enabled:
+                    self._store_summary_cache_entry(cache_key, summary)
+            state['summary'] = summary
+            print(f"✅ Summary generated")
+            logger.info("Summary generated with %d facts", num_facts)
+            logger.debug("State after summarize: summary_length=%d", len(state['summary']))
+        except Exception as exc:
+            self._notify_ui("on_stage_fail", stage, exc)
+            raise
         else:
-            if self._cache_enabled:
-                logger.info("Cache miss for summarize: %s", cache_key)
-            summary = self.llm_service.summarize_search_results(
-                state['original_query'],
-                state['formatted_results'],
-                num_facts=num_facts
-            )
-            if self._cache_enabled:
-                self._store_summary_cache_entry(cache_key, summary)
-        state['summary'] = summary
-        print(f"✅ Summary generated")
-        logger.info("Summary generated with %d facts", num_facts)
-        logger.debug("State after summarize: summary_length=%d", len(state['summary']))
-        return state
+            self._notify_ui("on_stage_complete", stage)
+            return state
     
     def _format_output_node(self, state: ResearchState) -> ResearchState:
         """Node: Format the final output."""
