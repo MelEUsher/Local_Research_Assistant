@@ -4,7 +4,6 @@ import socket
 from urllib import error as _urllib_error, parse as _urllib_parse, request as _urllib_request
 
 from config import OLLAMA_BASE_URL, OLLAMA_MODEL
-from retry_handler import retry_with_backoff
 
 try:
     from langchain_community.llms import Ollama
@@ -37,10 +36,10 @@ class OllamaLLMService:
 
     def verify_connection(self) -> bool:
         """Ensure the Ollama server is reachable and that the desired model exists."""
-        # Ollama documents `/api/models` as the stable model listing endpoint.
+        # Updated for Ollama 0.13.5+ API - uses /api/tags instead of /api/models
         models_url = _urllib_parse.urljoin(
             f"{self.base_url.rstrip('/')}/",
-            "api/models"
+            "api/tags"
         )
 
         try:
@@ -61,22 +60,20 @@ class OllamaLLMService:
             ) from exc
 
         try:
-            data = json.loads(raw)
+            response_data = json.loads(raw)
         except json.JSONDecodeError as exc:
             raise ValueError(
                 "Received an unexpected response while querying Ollama models."
             ) from exc
 
-        # Handle /api/tags response format
-        if isinstance(data, dict) and "models" in data:
-            models_list = data["models"]
-        elif isinstance(data, list):
-            models_list = data
-        else:
+        # Ollama 0.13.5+ returns {"models": [...]} structure
+        models_list = response_data.get("models", [])
+        if not isinstance(models_list, list):
             raise ValueError(
-                "Ollama returned an unexpected model list structure."
+                "Ollama returned an unexpected model list structure; expected a JSON array in 'models' field."
             )
 
+        # Extract model names from the response
         model_names = {
             entry.get("name") or entry.get("model")
             for entry in models_list
@@ -90,7 +87,6 @@ class OllamaLLMService:
 
         return True
 
-    @retry_with_backoff(max_retries=2, base_delay=1.0)
     def summarize_search_results(
         self, 
         query: str, 
@@ -131,7 +127,6 @@ Response:"""
         except Exception as exc:
             raise RuntimeError(f"Error generating summary: {exc}") from exc
 
-    @retry_with_backoff(max_retries=2, base_delay=1.0)
     def refine_query(self, research_request: str) -> str:
         """
         Refine the user's research request into a better search query.
