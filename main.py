@@ -1,6 +1,9 @@
 """Main entry point for the research assistant."""
 import argparse
+import subprocess
+import shutil
 import sys
+from pathlib import Path
 
 from export_service import ExportService
 from workflow import ResearchWorkflow
@@ -105,6 +108,27 @@ def _run_with_args(args):
         traceback.print_exc()
 
 
+def _launch_streamlit_ui():
+    """Start the Streamlit-based interface."""
+
+    streamlit_exec = shutil.which("streamlit")
+    if not streamlit_exec:
+        print(
+            "Streamlit CLI not found. Install dependencies with "
+            "`pip install -r requirements.txt` and try again."
+        )
+        sys.exit(1)
+    app_path = Path(__file__).with_name("web_app.py")
+    print("Launching Streamlit web interface...")
+    try:
+        subprocess.run([streamlit_exec, "run", str(app_path)], check=True)
+    except KeyboardInterrupt:
+        print("\nStreamlit stopped by user.")
+    except subprocess.CalledProcessError as exc:
+        print("\nStreamlit exited with an error.")
+        sys.exit(exc.returncode)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Run the local research assistant.")
     parser.add_argument("-c", "--check", action="store_true", help="Validate configuration and exit.")
@@ -114,8 +138,19 @@ def main():
         action="store_true",
         help="Save the research output to markdown and JSON files.",
     )
+    parser.add_argument(
+        "-w",
+        "--web",
+        action="store_true",
+        help="Launch the Streamlit web interface (`streamlit run web_app.py`).",
+    )
     parser.add_argument("query", nargs="*", help="Research query text (omit to use the interactive prompt).")
     args = parser.parse_args()
+
+    if args.web:
+        logger.info("Web interface requested")
+        _launch_streamlit_ui()
+        return
 
     logger.info("Application starting")
     try:
